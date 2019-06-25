@@ -1,3 +1,12 @@
+# Dataset files
+training/
+testing/
+testing2/
+*.csv
+
+# Random forest models
+*.pkl
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -142,49 +142,65 @@ if __name__ == '__main__':
     y_true = []
     x_rf = []  # We will store all the testing X and run the RF prediction only once to save time
 
-    start_time_all_games = timer()
+    start_time_testing = timer()
+
     for game_idx, game in enumerate(games_test):
-        if game_idx > 1:
-            break
+        start_time_process_game = timer()
+
         print("Processing game {}/{}".format(game_idx, len(games_test)))
-        start_time_game_process = timer()
-
         game_x, game_y = encode(game)
-        # customers = np.unique(game_x[:,0])
-        #
-        # raise Exception()
 
-        # This takes 2 minutes per game
-        # for cust_idx, (cust_x, cust_y) in enumerate(zip(game_x, game_y)):
-        #     prev_x = game_x[0:cust_idx]
-        #     if len(prev_x) == 0:  # Skip the first customer in the game (no previous day, no previous week)
-        #         continue
-        #
-        #     # Flip so we only consider the most recent time steps first when using argmax
-        #     prev_x = np.flip(prev_x, axis=0)
-        #
-        #     # Look for the customer name in the previous time steps
-        #
-        #     cust_name = cust_x[0]
-        #     prev_cust_names = prev_x[:, 0]
-        #     prev_timestep_idxs = np.nonzero(prev_cust_names == cust_name)[0]
-        #     if len(prev_timestep_idxs) < 168:  # Skip the first week
-        #         continue
-        #
-        #     prev_y = np.flip(game_y[0:cust_idx], axis=0)
-        #
-        #     # 1 hour back = 1 time step back [index 0]
-        #     # 1 day back = 24 time steps back [index 23]
-        #     # 1 week back = 168 time steps back [index 167]
-        #     prev_day_idx = prev_timestep_idxs[23]
-        #     prev_week_idx = prev_timestep_idxs[167]
-        #
-        #     preds_one_day.append(prev_y[prev_day_idx])
-        #     preds_one_week.append(prev_y[prev_week_idx])
-        #     x_rf.append(cust_x)
-        #     y_true.append(cust_y)
+        # To speed up computations looking up past week and past day data, split the dataset per hour
+        diff = np.where(np.diff(game_x[:, 6]))[0]
+        diff = np.insert(diff, 0, values=-1)
 
-        print("== Processing game took %.3f" % (timer() - start_time_game_process), 'sec')
+        x_byhour = []
+        y_byhour = []
+        for diff_idx, diff_start in enumerate(diff):
+            if diff_idx >= len(diff) - 1:  # Cannot use last two elements for slicing
+                break
+
+            diff_end = diff[diff_idx + 1]
+            x_byhour.append(game_x[slice(diff_start + 1, diff_end)])
+            y_byhour.append(game_y[slice(diff_start + 1, diff_end)])
+
+        for hour_idx, (hour_block_x, hour_block_y) in enumerate(zip(x_byhour, y_byhour)):
+            if hour_idx < 168:  # Skip first week (168 hours)
+                continue
+
+            prev_week_block_idx = hour_idx - 168
+            prev_day_block_idx = hour_idx - 24
+
+            prev_week_block_x = x_byhour[prev_week_block_idx]
+            prev_week_block_y = y_byhour[prev_week_block_idx]
+
+            prev_day_block_x = x_byhour[prev_day_block_idx]
+            prev_day_block_y = y_byhour[prev_day_block_idx]
+
+            for cust_idx, (cust_x, cust_y) in enumerate(zip(hour_block_x, hour_block_y)):
+                # Find the customer in the previous week same hour block
+                cust_name = cust_x[0]
+                prev_week_matches = np.nonzero(prev_week_block_x[:, 0] == cust_name)[0]
+                if len(prev_week_matches) != 1:  # The customer was not found in the previous week
+                    continue
+
+                prev_day_matches = np.nonzero(prev_day_block_x[:, 0] == cust_name)[0]
+                if len(prev_day_matches) != 1:
+                    continue
+
+                prev_week_cust_idx = prev_week_matches[0]
+                prev_day_cust_idx = prev_day_matches[0]
+
+                assert prev_week_block_x[prev_week_cust_idx][0] == cust_name, 'Not the same customer name previous week'
+                assert prev_day_block_x[prev_day_cust_idx][0] == cust_name, 'Not the same customer name previous day'
+                assert prev_week_block_x[prev_week_cust_idx][6] == cust_x[6], 'Not the same hour in the previous week'
+                assert prev_day_block_x[prev_day_cust_idx][6] == cust_x[6], 'Not the same hour in the previous day'
+
+                preds_one_day.append(prev_day_block_y[prev_day_cust_idx])
+                preds_one_week.append(prev_week_block_y[prev_week_cust_idx])
+                x_rf.append(cust_x)
+                y_true.append(cust_y)
+        print("== Processing game took %.3f" % (timer() - start_time_process_game), 'sec')
 
     start_time_rf_pred = timer()
 
@@ -193,8 +209,8 @@ if __name__ == '__main__':
     preds_rf = rf.predict(x_rf)
     rf.verbose = 0
 
-    print("= Random Forest Prediction took %.3f" % (timer() - start_time_rf_pred), 'sec')
-    print("== Processing all games took %.3f" % (timer() - start_time_all_games), 'sec')
+    print("= Random Forest prediction took %.3f" % (timer() - start_time_rf_pred), 'sec')
+    print("== Processing testing set took %.3f" % (timer() - start_time_testing), 'sec')
 
     # %% Metrics
     metric = metrics.mean_absolute_error

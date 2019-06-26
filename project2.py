@@ -90,11 +90,10 @@ y_true = []
 
 start_time_testing = timer()
 for idx, (x, y) in enumerate(zip(x_test, y_test)):
-    # Skip first week
-    if idx < 24:
+    if idx < 168:     # Skip first week (first 168 hours)
         continue
 
-    prev_week_idx = idx - 24
+    prev_week_idx = idx - 168
 
     assert x[3] == x_test[prev_week_idx][3], 'Not the same hour in the previous week'
 

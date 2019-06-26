@@ -60,6 +60,15 @@ def print_timestep(x, y, decode=True):
     print(s)
 
 
+def print_rf_importances(rf_model, features):
+    assert len(features) == len(rf_model.feature_importances_), 'Feature list size does not match RF feature size'
+
+    feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(features, rf_model.feature_importances_)]
+    feature_importances = sorted(feature_importances, key=lambda x: x[1], reverse=True)
+    for pair in feature_importances:
+        print('Variable: {:20} Importance: {}'.format(*pair))
+
+
 enc_name = LabelEncoder()
 enc_type = LabelEncoder()
 enc = OneHotEncoder(categorical_features=[0, 1])  # Only indices 0 and 1 are categorical
@@ -68,7 +77,6 @@ enc = OneHotEncoder(categorical_features=[0, 1])  # Only indices 0 and 1 are cat
 def encode(data):
     data = data.copy()
     # Project 1: 11 features and then the Customer Production/Consumption (12 columns)
-    # Project 2: 35 features and then the NetDemand (36 columns)
     x = data[:, :11]
     y = data[:, 11].astype(np.float32)
 
@@ -82,117 +90,116 @@ def encode(data):
     return x, y
 
 
-# %% Loading files
-start_time_load_files = timer()
+if __name__ == '__main__':
+    # %% Loading files
+    start_time_load_files = timer()
 
-print('Loading training and testing data')
-data_train, games_train = read_data(TRAINING_FOLDER)
-data_test, games_test = read_data(TESTING_FOLDER)
+    print('Loading training and testing data')
+    data_train, games_train = read_data(TRAINING_FOLDER)
+    data_test, games_test = read_data(TESTING_FOLDER)
 
-print("== Took %.3f" % (timer() - start_time_load_files), 'sec')
+    print("== Took %.3f" % (timer() - start_time_load_files), 'sec')
 
-# %% Encoding CustomerName and PowerType
-# data[CustomerName0,PowerType1,Population2,Date3,Month4,Day5,Hour6,Cloud7,Temp8,WindDir9,WindSpeed10,Net11]
-start_time_encoding = timer()
+    # %% Encoding CustomerName and PowerType
+    # data[CustomerName0,PowerType1,Population2,Date3,Month4,Day5,Hour6,Cloud7,Temp8,WindDir9,WindSpeed10,Net11]
+    start_time_encoding = timer()
 
-print("Encoding")
-x_train, y_train = encode(data_train)
-x_test, y_test = encode(data_test)
+    print("Encoding")
+    x_train, y_train = encode(data_train)
+    x_test, y_test = encode(data_test)
 
-print("== Encoding Took %.3f" % (timer() - start_time_encoding), 'sec')
+    print("== Encoding Took %.3f" % (timer() - start_time_encoding), 'sec')
 
-# %% Random forest training
-if os.path.exists(MODEL_FILENAME):
-    start_time_load_rf = timer()
+    # %% Random forest training
+    if os.path.exists(MODEL_FILENAME):
+        start_time_load_rf = timer()
 
-    print('Loading random forest from file')
-    rf = joblib.load(MODEL_FILENAME)
+        print('Loading random forest from file')
+        rf = joblib.load(MODEL_FILENAME)
+        rf.verbose = 0
+
+        print("== Loading RF Took %.3f" % (timer() - start_time_load_rf), 'sec')
+    else:
+        start_time_rf_train = timer()
+
+        print("Training random forest as file was not found")
+        rf = RandomForestRegressor(n_estimators=10, verbose=2, n_jobs=-1)
+        rf.fit(x_train, y_train)
+        rf.verbose = 0
+
+        print("== Training RF Took %.3f" % (timer() - start_time_rf_train), 'sec')
+
+        print("Saving RF model to a file")
+        joblib.dump(rf, MODEL_FILENAME)
+
+    # %% Stats
+    feature_list = ['CustomerName0', 'PowerType1', 'Population2', 'Date3', 'Month4', 'Day5', 'Hour6', 'Cloud7', 'Temp8', 'WindDir9', 'WindSpeed10', 'Net11']
+    print_rf_importances(rf, feature_list)
+
+    # %% Perform predictions
+    preds_one_day = []
+    preds_one_week = []
+    y_true = []
+    x_rf = []  # We will store all the testing X and run the RF prediction only once to save time
+
+    start_time_all_games = timer()
+    for game_idx, game in enumerate(games_test):
+        if game_idx > 1:
+            break
+        print("Processing game {}/{}".format(game_idx, len(games_test)))
+        start_time_game_process = timer()
+
+        game_x, game_y = encode(game)
+        # customers = np.unique(game_x[:,0])
+        #
+        # raise Exception()
+
+        # This takes 2 minutes per game
+        # for cust_idx, (cust_x, cust_y) in enumerate(zip(game_x, game_y)):
+        #     prev_x = game_x[0:cust_idx]
+        #     if len(prev_x) == 0:  # Skip the first customer in the game (no previous day, no previous week)
+        #         continue
+        #
+        #     # Flip so we only consider the most recent time steps first when using argmax
+        #     prev_x = np.flip(prev_x, axis=0)
+        #
+        #     # Look for the customer name in the previous time steps
+        #
+        #     cust_name = cust_x[0]
+        #     prev_cust_names = prev_x[:, 0]
+        #     prev_timestep_idxs = np.nonzero(prev_cust_names == cust_name)[0]
+        #     if len(prev_timestep_idxs) < 168:  # Skip the first week
+        #         continue
+        #
+        #     prev_y = np.flip(game_y[0:cust_idx], axis=0)
+        #
+        #     # 1 hour back = 1 time step back [index 0]
+        #     # 1 day back = 24 time steps back [index 23]
+        #     # 1 week back = 168 time steps back [index 167]
+        #     prev_day_idx = prev_timestep_idxs[23]
+        #     prev_week_idx = prev_timestep_idxs[167]
+        #
+        #     preds_one_day.append(prev_y[prev_day_idx])
+        #     preds_one_week.append(prev_y[prev_week_idx])
+        #     x_rf.append(cust_x)
+        #     y_true.append(cust_y)
+
+        print("== Processing game took %.3f" % (timer() - start_time_game_process), 'sec')
+
+    start_time_rf_pred = timer()
+
+    print("Running random forest prediction on all games (to save time)")
+    rf.verbose = 2
+    preds_rf = rf.predict(x_rf)
     rf.verbose = 0
 
-    print("== Loading RF Took %.3f" % (timer() - start_time_load_rf), 'sec')
-else:
-    start_time_rf_train = timer()
+    print("= Random Forest Prediction took %.3f" % (timer() - start_time_rf_pred), 'sec')
+    print("== Processing all games took %.3f" % (timer() - start_time_all_games), 'sec')
 
-    print("Training random forest as file was not found")
-    rf = RandomForestRegressor(n_estimators=10, verbose=2, n_jobs=-1)
-    rf.fit(x_train, y_train)
-    rf.verbose = 0
-
-    print("== Training RF Took %.3f" % (timer() - start_time_rf_train), 'sec')
-
-    print("Saving RF model to a file")
-    joblib.dump(rf, MODEL_FILENAME)
-
-# %% Stats
-feature_list = ['CustomerName0', 'PowerType1', 'Population2', 'Date3', 'Month4', 'Day5', 'Hour6', 'Cloud7', 'Temp8', 'WindDir9', 'WindSpeed10', 'Net11']
-# pred = rf.predict(x_test)
-# errors = abs(pred - y_test)
-# print('Mean Absolute Error:', np.mean(errors))
-
-importances = list(rf.feature_importances_)
-feature_importances = [(feature, round(importance, 2)) for feature, importance in zip(feature_list, importances)]
-feature_importances = sorted(feature_importances, key=lambda x: x[1], reverse=True)
-[print('Variable: {:20} Importance: {}'.format(*pair)) for pair in feature_importances]
-
-# %% Perform predictions
-preds_one_day = []
-preds_one_week = []
-y_true = []
-x_rf = []  # We will store all the testing X and run the RF prediction only once to save time
-
-start_time_all_games = timer()
-for game_idx, game in enumerate(games_test):
-    print("Processing game {}/{}".format(game_idx, len(games_test)))
-    start_time_game_process = timer()
-
-    game_x, game_y = encode(game)
-    raise Exception()
-    prev_end = 0
-    for cust_idx, (cust_x, cust_y) in enumerate(zip(game_x, game_y)):
-        prev_x = game_x[prev_end:cust_idx]
-        if len(prev_x) == 0:  # Skip the first customer in the game (no previous day, no previous week)
-            continue
-
-        # Flip so we only consider the most recent time steps first when using argmax
-        prev_x = np.flip(prev_x, axis=0)
-
-        # Look for the customer name in the previous time steps
-
-        cust_name = cust_x[0]
-        prev_cust_names = prev_x[:, 0]
-        prev_timestep_idxs = np.nonzero(prev_cust_names == cust_name)[0]
-        if len(prev_timestep_idxs) < 168:  # Skip the first week
-            continue
-
-        prev_y = np.flip(game_y[0:cust_idx], axis=0)
-
-        # 1 hour back = 1 time step back [index 0]
-        # 1 day back = 24 time steps back [index 23]
-        # 1 week back = 168 time steps back [index 167]
-        prev_day_idx = prev_timestep_idxs[23]
-        prev_week_idx = prev_timestep_idxs[167]
-
-        preds_one_day.append(prev_y[prev_day_idx])
-        preds_one_week.append(prev_y[prev_week_idx])
-        x_rf.append(cust_x)
-        y_true.append(cust_y)
-
-    print("== Processing game took %.3f" % (timer() - start_time_game_process), 'sec')
-
-start_time_rf_pred = timer()
-
-print("Running random forest prediction on all games (to save time)")
-rf.verbose = 2
-preds_rf = rf.predict(x_rf)
-rf.verbose = 0
-
-print("= Random Forest Prediction took %.3f" % (timer() - start_time_rf_pred), 'sec')
-print("== Processing all games took %.3f" % (timer() - start_time_all_games), 'sec')
-
-# %% Metrics
-metric = metrics.mean_absolute_error
-print('Metric {} | OneDay {:.5f}, OneWeek {:.5f}, RandomForest {:.5f}'.format(
-    metric.__name__,
-    metric(y_true, preds_one_day),
-    metric(y_true, preds_one_week),
-    metric(y_true, preds_rf)))
+    # %% Metrics
+    metric = metrics.mean_absolute_error
+    print('[Project 1] Metric {} | OneDay {:.5f}, OneWeek {:.5f}, RandomForest {:.5f}'.format(
+        metric.__name__,
+        metric(y_true, preds_one_day),
+        metric(y_true, preds_one_week),
+        metric(y_true, preds_rf)))

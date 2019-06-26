@@ -6,7 +6,9 @@ testing2/
 *.arff
 
 # Random forest models
+weka/
 *.pkl
+*.model
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -16,6 +16,9 @@ np.random.seed(1738)
 TRAINING_FOLDER = 'training'
 TESTING_FOLDER = 'testing'
 MODEL_FILENAME = 'random_forest10_p1.pkl'
+TEST_CUSTOMER_TYPES = ['CONSUMPTION', 'INTERRUPTIBLE_CONSUMPTION', 'THERMAL_STORAGE_CONSUMPTION', 'ELECTRIC_VEHICLE']
+# TEST_CUSTOMER_TYPES = ['CONSUMPTION', 'INTERRUPTIBLE_CONSUMPTION', 'THERMAL_STORAGE_CONSUMPTION', 'ELECTRIC_VEHICLE', 'SOLAR_PRODUCTION', 'WIND_PRODUCTION', 'BATTERY_STORAGE']
+# TEST_CUSTOMER_TYPES = ['SOLAR_PRODUCTION', 'WIND_PRODUCTION']
 
 
 # %% Function declarations
@@ -178,6 +181,11 @@ if __name__ == '__main__':
             prev_day_block_y = y_byhour[prev_day_block_idx]
 
             for cust_idx, (cust_x, cust_y) in enumerate(zip(hour_block_x, hour_block_y)):
+                # Only consider certain customers (this adds a 15 second overhead per game)
+                cust_type = enc_type.inverse_transform(int(cust_x[1]))
+                if cust_type not in TEST_CUSTOMER_TYPES:
+                    continue
+
                 # Find the customer in the previous week same hour block
                 cust_name = cust_x[0]
                 prev_week_matches = np.nonzero(prev_week_block_x[:, 0] == cust_name)[0]
@@ -219,3 +227,5 @@ if __name__ == '__main__':
         metric(y_true, preds_one_day),
         metric(y_true, preds_one_week),
         metric(y_true, preds_rf)))
+
+    print('Tested Customer Types: ', TEST_CUSTOMER_TYPES)

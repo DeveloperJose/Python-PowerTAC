@@ -3,6 +3,7 @@ training/
 testing/
 testing2/
 *.csv
+*.arff
 
 # Random forest models
 *.pkl
